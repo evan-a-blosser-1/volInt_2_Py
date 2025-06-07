@@ -70,9 +70,9 @@ def read_polyhedron(File):
     # Assign 4th row of .txt as z input         
     fz_input = data[range(numb_vert,row_tot),3] 
     # Convert Vertices data to float type       
-    fx = fx_input.astype(str)                   
-    fy = fy_input.astype(str)                  
-    fz = fz_input.astype(str)                 
+    fx = fx_input.astype(float)                   
+    fy = fy_input.astype(float)                  
+    fz = fz_input.astype(float)                 
     # Define: number of vertices on ith face 
     #  - used for .C program                 
     ith_face = []                            
@@ -89,9 +89,8 @@ def read_polyhedron(File):
     # Stacking Columns of Vertex Data      
     Vert_Data_Out_0 = np.column_stack((x, y))               
     Vert_Data_Out   = np.column_stack((Vert_Data_Out_0, z)) 
-    # Stacking Columns of Face Data                         
-    Face_Data_Out_0 = np.column_stack((ith_array, fx))      
-    Face_Data_Out_Y = np.column_stack((Face_Data_Out_0,fy)) 
+    # Stacking Columns of Face Data                            
+    Face_Data_Out_Y = np.column_stack((fx,fy)) 
     Face_Data_Out   = np.column_stack((Face_Data_Out_Y,fz)) 
     ########################################################
     return Vert_Data_Out, Face_Data_Out, numb_vert, numb_face
@@ -100,14 +99,17 @@ def read_polyhedron(File):
 def compFaceNorm(V,F):
     nF = len(F)
     norm = np.zeros((3,nF))
+    #
     
     for it in range(nF): 
-        dx1 = V[F[it,1],0] - V[F[it,0],0]
-        dy1 = V[F[it,1],1] - V[F[it,0],1]
-        dz1 = V[F[it,1],2] - V[F[it,0],2]
-        dx2 = V[F[it,2],0] - V[F[it,1],0]
-        dy2 = V[F[it,2],1] - V[F[it,1],1]
-        dz2 = V[F[it,2],2] - V[F[it,1],2]
+        it = int(it)  # Ensure it is an integer index
+        print(it)
+        dx1 = V[int(F[it,1]),0] - V[int(F[it,0]),0]
+        dy1 = V[int(F[it,1]),1] - V[int(F[it,0]),1]
+        dz1 = V[int(F[it,1]),2] - V[int(F[it,0]),2]
+        dx2 = V[int(F[it,2]),0] - V[int(F[it,1]),0]
+        dy2 = V[int(F[it,2]),1] - V[int(F[it,1]),1]
+        dz2 = V[int(F[it,2]),2] - V[int(F[it,1]),2]
         #####
         # Face normal vector
         nx = dy1*dz2 - dy2*dz1
@@ -127,9 +129,12 @@ def compFaceNorm(V,F):
         norm[it,2] = nz/n_mag 
         #####################
         # 
-        w = -norm[it,0]*V[F[it,0],0] \
-            -norm[it,0]*V[F[it,0],1] \
-            -norm[it,0]*V[F[it,0],2] 
+        w = -norm[it,0]*V[int(F[it,0]),0] \
+            -norm[it,0]*V[int(F[it,0]),1] \
+            -norm[it,0]*V[int(F[it,0]),2] 
+        #################################
+        print('norm:-')
+        print(norm)
         return norm, w
 
 
@@ -142,10 +147,18 @@ def comp_project_int(V,F):
     P1 = Pa = Pb = Paa = Pab = Pbb = Paaa = Paab = Pabb = Pbbb = 0.0
 
     for it2 in range(nV):
-        a0 = 0.0# Filler
-        b0 = 0.0# This looks like verts index, 
-        a1 = 0.0# but varying in volInt.c from 
-        b1 = 0.0# X,Y,Z array notation 
+        ##################################### !!!! Not sure this is correct
+        # Get current and next vertex coordinates
+        curr_vert_idx = int(F[it2, 1]) - 1  # -1 because obj files are 1-indexed
+        next_vert_idx = int(F[it2, 2]) - 1
+        
+        a0 = V[curr_vert_idx][0]
+        b0 = V[curr_vert_idx][1] 
+        a1 = V[next_vert_idx][0]
+        b1 = V[next_vert_idx][1] 
+        #######################################
+        
+        
         ###
         da   = a1 - a0
         db   = b1 - b0
@@ -207,17 +220,165 @@ def comp_project_int(V,F):
 
 
 
+def compFaceIntegrals(F, V,norm,w):
+    P1, Pa, Pb, Paa, Pab, Pbb, Paaa, Paab, Pabb, Pbbb = comp_project_int(V,F)
+    #####
+    # 
+    k1 = 1 / norm[2]
+    #
+    k2 = k1 * k1 
+    k3 = k2 * k1
+    k4 = k3 * k1
+    ###
+    Fa = k1 * Pa 
+    Fb = k1 * Pb
+    Fc = -k2 * (norm[0] * Pa + norm[1] * Pb + w*P1)
+    
+    Faa = k1 * Paa
+    Fbb = k1 * Pbb
+    Fcc = k3 * (np.sqrt(norm[0])**Paa + 
+                2*norm[0]*norm[1]*Pab +  
+                np.sqrt(norm[1])**Pbb +  
+                w*(2*(norm[0]*Pa + norm[1]*Pb) +w*P1))
+               
+               
+    Faaa = k1 * Paaa
+    Fbbb = k1 * Pbbb
+    
+    Fccc = - k4 * (np.power(norm[0], 3)*Paaa + 
+                 3*np.power(norm[0], 2)*norm[1]*Paab + 
+                 3*norm[0]*np.power(norm[1], 2)*Pabb +
+                 np.power(norm[1], 3)*Pbbb +
+                 w*(3*(np.power(norm[0], 2)*Paa + 
+                 2*norm[0]*norm[1]*Pab + 
+                 np.power(norm[1], 2)*Pbb) +
+                 w*w*(3*(norm[0]*Pa + norm[1]*Pb) + w*P1)))
+               
+                
+    Faab= k1*Paab
+    Fbbc = -k2*(norm[0]*Pabb + norm[1]*Pbbb + w*Pbb)
+    Fcca = k3*(np.sqrt(norm[0])*Paaa + 
+               2*norm[0]*norm[1]*Paab +
+               np.sqrt(norm[1])*Pabb +
+               w*(2*(norm[0]*Paa + norm[1]*Pab) + w*Pa))
+    
+    ###
+    return Fa, Fb, Fc, Faa, Fbb, Fcc, Faaa, Fbbb, Fccc, Faab, Fbbc, Fcca
+
+
+
+
+def compVolumeIntegrals(V, F,norm,w):
+    #
+    T0 = 0.0
+    T1 = np.zeros(3)
+    T2 = np.zeros(3)
+    TP = np.zeros(3)
+    #
+    Fa, Fb, Fc, Faa, Fbb, Fcc, Faaa, Fbbb, Fccc, Faab, Fbbc, Fcca = compFaceIntegrals(F,V,norm,w)
+    
+    ###
+    nx = abs(norm[0])
+    ny = abs(norm[1])
+    nz = abs(norm[2])
+    #
+    # C chunk 
+    # if (nx > ny && nx > nz) C = X;
+    # else C = (ny > nz) ? Y : Z;
+    # A = (C + 1) % 3;
+    # B = (A + 1) % 3;
+
+    # T0 += f->norm[X] * ((A == X) ? Fa : ((B == X) ? Fb : Fc));
+
+    T1[0] += norm[0] * Faa
+    T1[1] += norm[1] * Fbb
+    T1[2] += norm[2] * Fcc
+    T2[0] += norm[0] * Faaa
+    T2[1] += norm[1] * Fbbb
+    T2[2] += norm[2] * Fccc
+    TP[0] += norm[0] * Faab
+    TP[1] += norm[1] * Fbbc
+    TP[2] += norm[2] * Fcca
+  
+
+    T1[0] /= 2; T1[1] /= 2; T1[2] /= 2
+    T2[0] /= 3; T2[1] /= 3; T2[2] /= 3
+    TP[0] /= 2; TP[1] /= 2; TP[2] /= 2
+
+    return T0, T1, T2, TP
 
 if __name__ == "__main__":
     ####
     # Replace with user file selection
-    File = 'Apophis.obj'
+    File = 'tetra.obj'
+    #
+    # assumed units
+    den  = 1.0
     #####
     # Read in file 
     V, F, nV, nF = read_polyhedron(File)
-    #####
-    # Compute Face Normals
-    norm , w = compFaceNorm(V,F)
     ####
-    # 
+    # Compute normals and weights
+    norm, w = compFaceNorm(V, F)
+    ####
+    # Compute the Volume Integrals
+    T0, T1, T2, TP = compVolumeIntegrals(V, F,norm,w)
+    #################################################
+    ################ Center of Mass Computation
+    CM_x = T1[0]/ T0
+    CM_y = T1[1]/ T0
+    CM_z = T1[2]/ T0
+    CM = np.array([CM_x, CM_y, CM_z])
+    ##################################
+    # Inertial Tensor Computation
+    I_xx = den * (T2[1] + T2[2])
+    I_yy = den * (T2[2] + T2[0])
+    I_zz = den * (T2[0] + T2[1])
+    I_xy = I_yx = - den * TP[0]
+    I_yz = I_zy = - den * TP[1]
+    I_zx = I_xz = - den * TP[2]
     
+    # translate inertial tensor to center of mass
+    mass = den * T0
+    I_xx -= mass * (CM_y**2 + CM_z**2)
+    I_yy -= mass * (CM_x**2 + CM_z**2)
+    I_zz -= mass * (CM_x**2 + CM_y**2)
+    I_yx += mass * CM_x * CM_y
+    I_zy += mass * CM_y * CM
+    I_xz += mass * CM_x * CM
+    I_xy = I_yx 
+    I_yz = I_zy
+    I_zx = I_xz
+    #
+    # Create the Inertial Tensor array    
+    I = np.array([[I_xx, I_xy, I_zx],
+                  [I_yx, I_yy, I_yz],
+                  [I_zx, I_zy, I_zz]])
+    
+    ####################
+    # Print the results
+    out = f"""
+{'-'*50}
+        Volume Integration Results:
+{'-'*50}
+T1: {T0}
+Tx: {T1[0]}
+Ty: {T1[1]}
+Tz: {T1[2]}
+Txx: {T2[0]}
+Tyy: {T2[1]}
+Tzz: {T2[2]}
+Txy: {TP[0]}
+Tyz: {TP[1]}
+Tzx: {TP[2]}
+{'-'*50}
+    Center of Mass: 
+    ({CM_x}, {CM_y}, {CM_z})
+{'-'*50}
+    Inertial Tensor: with respect to the center of mass
+    (for {den} density)
+    {I}
+{'-'*50}  
+    """
+    print(out)
+    ###################
